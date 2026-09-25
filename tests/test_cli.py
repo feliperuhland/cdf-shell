@@ -277,3 +277,12 @@ def test_init_rejects_unknown_shell(capsys: pytest.CaptureFixture[str]) -> None:
 
     assert exc_info.value.code == 2
     assert "invalid choice" in capsys.readouterr().err
+
+
+def test_init_fish_prints_fish_wrapper(capsys: pytest.CaptureFixture[str]) -> None:
+    exit_code = cli.main(["--init", "fish"])
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert out.startswith("# cdf shell integration for fish")
+    assert "function cdf" in out

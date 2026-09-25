@@ -41,6 +41,11 @@ eval "$(command cdf --init bash)"
 eval "$(command cdf --init zsh)"
 ```
 
+```fish
+# ~/.config/fish/config.fish
+command cdf --init fish | source
+```
+
 This defines a shell function also named `cdf`, which takes priority over
 the binary in your shell and calls it internally via `command cdf`. Make
 sure the `cdf` binary itself is on `PATH` (e.g. via `uv tool install .`, or
@@ -50,7 +55,7 @@ by adding `.venv/bin` to `PATH`).
 
 ```sh
 cdf [term ...] [-p/--path ROOT] [--git/--no-git] [-a/--all|--no-all] [-c/--config FILE]
-cdf --init {bash,zsh}
+cdf --init {bash,zsh,fish}
 ```
 
 | Flag | Default | Meaning |
@@ -60,7 +65,7 @@ cdf --init {bash,zsh}
 | `--git` / `--no-git` | `--git` | only match git repository roots |
 | `-a, --all` / `--no-all` | `--no-all` | include hidden/dot directories |
 | `-c, --config` | `$CDF_CONFIG_PATH`, else first existing default | config file path |
-| `--init SHELL` | | print the shell integration for `bash` or `zsh` and exit |
+| `--init SHELL` | | print the shell integration for `bash`, `zsh` or `fish` and exit |
 
 Run `cdf --help` for the full reference, or `cdf --version` (the shell
 function special-cases `--help`/`-h`/`--version`/`--init` to pass them straight

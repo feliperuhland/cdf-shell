@@ -17,7 +17,8 @@ _EXIT_SELECTED = 0
 _EXIT_NO_SELECTION = 1
 _EXIT_ERROR = 2
 _EXIT_INTERRUPTED = 130
-_INIT_SHELLS = ("bash", "zsh")
+# bash and zsh share one POSIX-style wrapper; fish needs its own.
+_INIT_SCRIPTS = {"bash": "cdf.sh", "zsh": "cdf.sh", "fish": "cdf.fish"}
 
 
 def create_walker() -> DirectoryWalker:
@@ -43,8 +44,8 @@ def _resolve_config_path(cli_config: Path | None) -> Path | None:
 
 
 def shell_init_script(shell: str) -> str:
-    # bash and zsh share one POSIX-style wrapper; `shell` is validated by argparse.
-    return resources.files("cdf").joinpath("shell", "cdf.sh").read_text(encoding="utf-8")
+    script = resources.files("cdf").joinpath("shell", _INIT_SCRIPTS[shell])
+    return script.read_text(encoding="utf-8")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -54,7 +55,8 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "This binary only prints the resolved path; it never changes your shell's "
             'working directory itself. Add `eval "$(command cdf --init bash)"` (or zsh) '
-            "to your shell rc: it defines a `cdf` shell function (which takes priority "
+            "to your shell rc, or `command cdf --init fish | source` to config.fish: it "
+            "defines a `cdf` shell function (which takes priority "
             "over this binary and calls it internally via `command cdf`) that actually "
             "cds into the result.\n\n"
             "Defaults shown below can also be set in the config file (-c/--config); "
@@ -102,10 +104,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--init",
-        choices=_INIT_SHELLS,
+        choices=tuple(_INIT_SCRIPTS),
         default=None,
         metavar="SHELL",
-        help=f"print the shell integration for SHELL ({', '.join(_INIT_SHELLS)}) and exit",
+        help=f"print the shell integration for SHELL ({', '.join(_INIT_SCRIPTS)}) and exit",
     )
     parser.add_argument(
         "--version",
