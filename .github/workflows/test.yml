@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -28,8 +28,26 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
-      - name: Install zsh and fish (shell wrapper tests skip without them)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh fish
+      # Pinned to the versions the shell wrapper tests were verified with;
+      # the tests skip a shell that is missing, so this must not silently drift.
+      - name: Install zsh 5.9 and fish 4.9.3
+        env:
+          FISH_VERSION: 4.9.3
+          FISH_SHA256: 8f643d10ad1abb0ef7072764c01ceb5cf61b2d373fda400cf60f0bad69b7e095
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zsh
+          if ! zsh --version | grep -q '^zsh 5\.9 '; then
+            echo "::error::expected zsh 5.9, got: $(zsh --version)"
+            exit 1
+          fi
+          curl -fsSL -o "$RUNNER_TEMP/fish.tar.xz" \
+            "https://github.com/fish-shell/fish-shell/releases/download/${FISH_VERSION}/fish-${FISH_VERSION}-linux-x86_64.tar.xz"
+          echo "${FISH_SHA256}  $RUNNER_TEMP/fish.tar.xz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xf "$RUNNER_TEMP/fish.tar.xz" -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/fish" --version
 
       - name: Run test suite
         run: make test
