@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from cdf import cli
-from cdf.errors import CdfError
+from cdf.errors import CdfError, NoCandidatesError
 
 
 @pytest.fixture(autouse=True)
@@ -17,8 +17,8 @@ def _clear_cdf_config_path_env(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _isolate_default_config_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "cdf.config.DEFAULT_CONFIG_PATHS",
-        (tmp_path / "unused-default-1.conf", tmp_path / "unused-default-2.conf"),
+        "cdf.config.default_config_paths",
+        lambda: (tmp_path / "unused-default-1.conf", tmp_path / "unused-default-2.conf"),
     )
 
 
@@ -198,3 +198,82 @@ def test_version_flag_falls_back_when_package_metadata_missing(
 
     assert exc_info.value.code == 0
     assert "unknown" in capsys.readouterr().out
+
+
+def test_multiple_term_words_are_joined(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured_terms: list[str] = []
+
+    def fake_resolve(term: str, root: Path, **kwargs: object) -> Path | None:
+        captured_terms.append(term)
+        return None
+
+    monkeypatch.setattr(cli, "resolve", fake_resolve)
+
+    cli.main(["foo", "bar", "--path", str(tmp_path)])
+
+    assert captured_terms == ["foo bar"]
+
+
+def test_config_ignore_reaches_resolve(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_file = tmp_path / "cdf.conf"
+    config_file.write_text('ignore = ["target"]\n')
+    captured_kwargs: dict[str, object] = {}
+
+    def fake_resolve(term: str, root: Path, **kwargs: object) -> Path | None:
+        captured_kwargs.update(kwargs)
+        return None
+
+    monkeypatch.setattr(cli, "resolve", fake_resolve)
+
+    cli.main(["--path", str(tmp_path), "--config", str(config_file)])
+
+    assert captured_kwargs["ignore"] == ("target",)
+
+
+def test_no_candidates_prints_hint_and_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def fake_resolve(*args: object, **kwargs: object) -> Path | None:
+        raise NoCandidatesError("no git repositories found")
+
+    monkeypatch.setattr(cli, "resolve", fake_resolve)
+
+    exit_code = cli.main(["--path", str(tmp_path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err == "no git repositories found\n"
+
+
+def test_keyboard_interrupt_exits_130_quietly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def fake_resolve(*args: object, **kwargs: object) -> Path | None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "resolve", fake_resolve)
+
+    exit_code = cli.main(["--path", str(tmp_path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 130
+    assert captured.out == ""
+
+
+@pytest.mark.parametrize("shell", ["bash", "zsh"])
+def test_init_prints_shell_wrapper(shell: str, capsys: pytest.CaptureFixture[str]) -> None:
+    exit_code = cli.main(["--init", shell])
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "cdf() {" in out
+    assert 'cd -- "$target"' in out
+
+
+def test_init_rejects_unknown_shell(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["--init", "tcsh"])
+
+    assert exc_info.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err

@@ -31,12 +31,14 @@ makepkg -si
 ```
 
 `cdf` (the binary) only *resolves* a path and prints it to stdout — a Python
-process can't change its parent shell's working directory. Source the shell
-wrapper so the `cdf` command actually `cd`s for you:
+process can't change its parent shell's working directory. Load the shell
+integration so the `cdf` command actually `cd`s for you:
 
 ```sh
-# ~/.bashrc / ~/.zshrc
-source /path/to/cdf/shell/cdf.sh
+# ~/.bashrc
+eval "$(command cdf --init bash)"
+# ~/.zshrc
+eval "$(command cdf --init zsh)"
 ```
 
 This defines a shell function also named `cdf`, which takes priority over
@@ -47,27 +49,31 @@ by adding `.venv/bin` to `PATH`).
 ## Usage
 
 ```sh
-cdf [term] [-p/--path ROOT] [--git/--no-git] [-a/--all|--no-all] [-c/--config FILE]
+cdf [term ...] [-p/--path ROOT] [--git/--no-git] [-a/--all|--no-all] [-c/--config FILE]
+cdf --init {bash,zsh}
 ```
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `term` | `""` | initial fuzzy filter text passed to `fzf` |
+| `term ...` | `""` | initial fuzzy filter text passed to `fzf` (several words are joined with spaces) |
 | `-p, --path` | cwd | root to search from |
 | `--git` / `--no-git` | `--git` | only match git repository roots |
 | `-a, --all` / `--no-all` | `--no-all` | include hidden/dot directories |
 | `-c, --config` | `$CDF_CONFIG_PATH`, else first existing default | config file path |
+| `--init SHELL` | | print the shell integration for `bash` or `zsh` and exit |
 
 Run `cdf --help` for the full reference, or `cdf --version` (the shell
-function special-cases `--help`/`-h`/`--version` to pass them straight
+function special-cases `--help`/`-h`/`--version`/`--init` to pass them straight
 through instead of attempting to `cd` into their output).
 
 ### Exit codes
 
 - `0` — a directory was selected
-- `1` — nothing was selected (cancelled in `fzf`, or no candidates found)
+- `1` — nothing was selected (cancelled in `fzf`, or no candidates found, in
+  which case a hint is printed on stderr)
 - `2` — an error occurred (message on stderr) — e.g. `fzf` missing, or a bad
   config file
+- `130` — interrupted with Ctrl-C
 
 ## Config file
 
@@ -76,15 +82,20 @@ The config file path is resolved in this order:
 1. `-c/--config FILE` — must exist, or it's an error.
 2. `$CDF_CONFIG_PATH` — must exist, or it's an error.
 3. Otherwise, the first of these that exists (silently skipped if none do):
-   `~/cdf.conf`, then `~/.config/cdf/cdf.conf`.
+   `$XDG_CONFIG_HOME/cdf/cdf.conf` (default `~/.config/cdf/cdf.conf`), then
+   `~/cdf.conf`.
 
 All keys are optional (TOML syntax, despite the `.conf` extension):
 
 ```toml
-path = "~/projects"  # string, expanded with ~
+path = "~/projects"  # string, expanded with ~; relative paths are relative to this file
 git = true            # boolean
 hidden = false        # boolean
+ignore = ["node_modules", "__pycache__", ".venv"]  # glob patterns of directory names to skip
 ```
+
+`ignore` replaces the default list shown above (set `ignore = []` to skip
+nothing). `.git` directories are never descended into regardless.
 
 Unknown keys, and values of the wrong type (e.g. `git = "false"` instead of
 `git = false`), are rejected with an error, to catch typos early.
