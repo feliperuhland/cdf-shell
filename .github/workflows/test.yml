@@ -28,8 +28,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
-      - name: Install fish (shell wrapper tests skip without it)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fish
+      - name: Install zsh and fish (shell wrapper tests skip without them)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh fish
 
       - name: Run test suite
         run: make test
