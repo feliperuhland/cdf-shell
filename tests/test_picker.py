@@ -199,3 +199,14 @@ def test_pick_raises_when_fzf_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(CdfError, match="fzf"):
         FzfPicker().pick([Path("/some/repo")], "term")
+
+
+def test_walk_failure_stops_fzf_and_is_reported(tmp_path: Path, fake_fzf: FakeFzf) -> None:
+    fake_fzf.respond(0, b"0\t" + os.fsencode(tmp_path) + b"\0")
+
+    def failing_walk() -> Iterator[Path]:
+        yield tmp_path
+        raise OSError("disk on fire")
+
+    with pytest.raises(CdfError, match="directory walk failed: disk on fire"):
+        FzfPicker().pick(failing_walk(), "")

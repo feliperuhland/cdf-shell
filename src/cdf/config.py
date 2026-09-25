@@ -20,16 +20,31 @@ class Config:
     ignore: tuple[str, ...] = field(default=DEFAULT_IGNORE)
 
 
+def _home() -> Path | None:
+    # Path.home() raises when $HOME is unset and the user has no passwd entry
+    # (e.g. an arbitrary UID in a container); treat that as "no home".
+    try:
+        return Path.home()
+    except RuntimeError:
+        return None
+
+
 def default_config_paths() -> tuple[Path, ...]:
-    xdg_config_home = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return (
-        Path(xdg_config_home) / "cdf" / "cdf.conf",
-        Path.home() / "cdf.conf",
-    )
+    home = _home()
+    paths: list[Path] = []
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
+    # The XDG spec says to ignore a relative XDG_CONFIG_HOME.
+    if xdg_config_home and Path(xdg_config_home).is_absolute():
+        paths.append(Path(xdg_config_home) / "cdf" / "cdf.conf")
+    elif home is not None:
+        paths.append(home / ".config" / "cdf" / "cdf.conf")
+    if home is not None:
+        paths.append(home / "cdf.conf")
+    return tuple(paths)
 
 
-def _first_existing_default(paths: tuple[Path, ...]) -> Path:
-    return next((path for path in paths if path.exists()), paths[0])
+def _first_existing_default(paths: tuple[Path, ...]) -> Path | None:
+    return next((path for path in paths if path.exists()), None)
 
 
 def _absolute(path: Path | None) -> Path:
@@ -44,11 +59,11 @@ def _absolute(path: Path | None) -> Path:
         ) from exc
 
 
-def load_config_file(config_path: Path, *, explicit: bool = False) -> dict[str, object]:
+def load_config_file(config_path: Path) -> dict[str, object]:
+    # Default locations are only ever passed in when they exist, so a missing
+    # file here is always one the user named (-c or $CDF_CONFIG_PATH).
     if not config_path.exists():
-        if explicit:
-            raise CdfError(f"config file not found: {config_path}")
-        return {}
+        raise CdfError(f"config file not found: {config_path}")
     try:
         with config_path.open("rb") as config_file:
             data = tomllib.load(config_file)
@@ -73,7 +88,11 @@ def _file_overrides(file_data: dict[str, object], config_path: Path) -> dict[str
             raise CdfError(f"{config_path}: 'path' must be a string, got {type_name}")
         # A relative path in the file means relative to the file, not to
         # wherever cdf happens to be run from.
-        overrides["path"] = config_path.parent / Path(raw_path).expanduser()
+        try:
+            expanded = Path(raw_path).expanduser()
+        except RuntimeError as exc:
+            raise CdfError(f"{config_path}: cannot expand '~' in 'path': {exc}") from exc
+        overrides["path"] = config_path.parent / expanded
 
     for key in ("git", "hidden"):
         if key in file_data:
@@ -106,13 +125,12 @@ def resolve_config(
     cli_git: bool | None = None,
     cli_hidden: bool | None = None,
 ) -> Config:
-    explicit = config_path is not None
     resolved_config_path = config_path or _first_existing_default(default_config_paths())
-    file_data = load_config_file(resolved_config_path, explicit=explicit)
-    overrides = {
-        **_file_overrides(file_data, resolved_config_path),
-        **_cli_overrides(cli_path, cli_git, cli_hidden),
-    }
+    file_overrides: dict[str, Any] = {}
+    if resolved_config_path is not None:
+        file_data = load_config_file(resolved_config_path)
+        file_overrides = _file_overrides(file_data, resolved_config_path)
+    overrides = {**file_overrides, **_cli_overrides(cli_path, cli_git, cli_hidden)}
     root = _absolute(overrides.pop("path", None))
     config = Config(path=root, **overrides)
 

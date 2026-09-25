@@ -65,6 +65,9 @@ def build_parser() -> argparse.ArgumentParser:
             "(cancelled or no matches), 2 = an error occurred (see stderr)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        # No "--ver" for "--version" etc.: the shell wrappers recognise the
+        # informational flags by their exact spelling.
+        allow_abbrev=False,
     )
     parser.add_argument(
         "term", nargs="*", default=[], help="initial fuzzy filter text (words are joined)"
@@ -98,7 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "config file path (default: $CDF_CONFIG_PATH, else first existing of "
-            + ", ".join(str(path) for path in default_config_paths())
+            + (", ".join(str(path) for path in default_config_paths()) or "none")
             + ")"
         ),
     )

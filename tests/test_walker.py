@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from cdf.errors import CdfError
 from cdf.walker import FilesystemWalker
 
 
@@ -121,3 +122,90 @@ def test_results_are_sorted_per_level(tmp_path: Path, walker: FilesystemWalker) 
     result = list(walker.walk(tmp_path, git_only=False, include_hidden=False, ignore=()))
 
     assert result == [tmp_path / "a", tmp_path / "b", tmp_path / "c"]
+
+
+def test_unreadable_root_raises(tmp_path: Path, walker: FilesystemWalker) -> None:
+    root = tmp_path / "locked"
+    _make_repo(root / "repo")
+    root.chmod(0o000)
+
+    try:
+        with pytest.raises(CdfError, match="cannot read search root"):
+            list(walker.walk(root, git_only=True, include_hidden=False, ignore=()))
+    finally:
+        root.chmod(0o755)
+
+
+def test_unreadable_subdirectory_is_skipped(tmp_path: Path, walker: FilesystemWalker) -> None:
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (tmp_path / "open").mkdir()
+    locked.chmod(0o000)
+
+    try:
+        result = set(walker.walk(tmp_path, git_only=False, include_hidden=False, ignore=()))
+    finally:
+        locked.chmod(0o755)
+
+    # It could not be cd'd into anyway (no search permission), so it is left out.
+    assert result == {tmp_path / "open"}
+
+
+def test_symlinked_directory_is_listed_but_not_entered(
+    tmp_path: Path, walker: FilesystemWalker
+) -> None:
+    (tmp_path / "real" / "inner").mkdir(parents=True)
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "linked").symlink_to(tmp_path / "real")
+
+    result = set(walker.walk(root, git_only=False, include_hidden=False, ignore=()))
+
+    assert result == {root / "linked"}
+
+
+def test_symlinked_repo_is_listed_in_git_mode(tmp_path: Path, walker: FilesystemWalker) -> None:
+    _make_repo(tmp_path / "real-repo")
+    (tmp_path / "real-plain").mkdir()
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "repo-link").symlink_to(tmp_path / "real-repo")
+    (root / "plain-link").symlink_to(tmp_path / "real-plain")
+
+    result = set(walker.walk(root, git_only=True, include_hidden=False, ignore=()))
+
+    assert result == {root / "repo-link"}
+
+
+def test_symlink_loop_is_listed_once(tmp_path: Path, walker: FilesystemWalker) -> None:
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "back").symlink_to(tmp_path)
+
+    result = list(walker.walk(tmp_path, git_only=False, include_hidden=False, ignore=()))
+
+    assert result == [tmp_path / "sub", tmp_path / "sub" / "back"]
+
+
+def test_symlinks_inside_a_repo_are_not_listed_in_git_mode(
+    tmp_path: Path, walker: FilesystemWalker
+) -> None:
+    _make_repo(tmp_path / "other")
+    repo = tmp_path / "repo"
+    _make_repo(repo)
+    (repo / "link").symlink_to(tmp_path / "other")
+
+    result = set(walker.walk(tmp_path, git_only=True, include_hidden=False, ignore=()))
+
+    assert result == {tmp_path / "other", repo}
+
+
+def test_hidden_and_ignored_symlinks_are_pruned(tmp_path: Path, walker: FilesystemWalker) -> None:
+    (tmp_path / "real").mkdir()
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / ".hidden-link").symlink_to(tmp_path / "real")
+    (root / "node_modules").symlink_to(tmp_path / "real")
+
+    result = set(walker.walk(root, git_only=False, include_hidden=False, ignore=("node_modules",)))
+
+    assert result == set()

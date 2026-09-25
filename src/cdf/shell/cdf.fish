@@ -12,5 +12,11 @@ function cdf --description 'Interactively find a directory below here and cd int
     or return
     # Command substitution splits on newlines; rejoin so a name containing one survives.
     set -l target (string join \n -- $lines | string collect)
-    test -n "$target"; and cd -- $target
+    # Only ever cd into a real directory; anything else (e.g. help text from
+    # combined short flags like -ah) is printed instead.
+    if test -d "$target"
+        cd -- $target
+    else if test -n "$target"
+        printf '%s\n' $target
+    end
 end

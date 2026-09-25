@@ -98,3 +98,16 @@ def test_informational_flags_pass_through(shell: str, tmp_path: Path, flag: str)
 
     assert result.stdout.splitlines() == ["some text", "more text", "status=0", str(tmp_path)]
     assert result.stderr == ""
+
+
+def test_prints_non_directory_output_instead_of_cd(shell: str, tmp_path: Path) -> None:
+    # e.g. `cdf -ah`: help text on stdout with exit 0, which must not be cd'd into.
+    result = _run_wrapper(shell, tmp_path, "-ah", out="usage: cdf [-h]\nmore help")
+
+    assert result.stdout.splitlines() == [
+        "usage: cdf [-h]",
+        "more help",
+        "status=0",
+        str(tmp_path),
+    ]
+    assert result.stderr == ""

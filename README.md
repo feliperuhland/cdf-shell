@@ -8,6 +8,8 @@ select.
   whole filesystem, never a cached/global index.
 - By default it only matches git repository roots and stops descending once
   it finds one (pass `--no-git` to walk every directory instead).
+- Symlinked directories are listed (in git mode, only if they point at a
+  repository) but never descended into, so symlink loops can't hang the walk.
 - Selection is powered by [`fzf`](https://github.com/junegunn/fzf), which
   must be on `PATH`.
 
@@ -76,8 +78,8 @@ through instead of attempting to `cd` into their output).
 - `0` — a directory was selected
 - `1` — nothing was selected (cancelled in `fzf`, or no candidates found, in
   which case a hint is printed on stderr)
-- `2` — an error occurred (message on stderr) — e.g. `fzf` missing, or a bad
-  config file
+- `2` — an error occurred (message on stderr) — e.g. `fzf` missing, an
+  unreadable search root, or a bad config file
 - `130` — interrupted with Ctrl-C
 
 ## Config file
@@ -111,4 +113,10 @@ Unknown keys, and values of the wrong type (e.g. `git = "false"` instead of
 make run    # uv run python -m cdf
 make test   # pytest + ruff + ruff-format + mypy (strict) + coverage, gated at 100%
 make lint   # uv run ruff check .
+make build  # sdist + wheel, with the build backend pinned by hash (build-constraints.txt)
+make build-constraints  # re-lock build-constraints.txt after editing build-constraints.in
 ```
+
+Supported Python: 3.11 through 3.14; CI runs the full `make test` gate on
+each, with the bash/zsh/fish wrapper tests running against pinned zsh 5.9
+and fish 4.9.3.

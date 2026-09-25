@@ -70,3 +70,20 @@ def test_resolve_raises_on_no_candidates(tmp_path: Path, git_only: bool, message
         )
 
     assert picker.calls == []
+
+
+def test_no_candidates_inside_a_repo_says_so(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / "src").mkdir()
+
+    with pytest.raises(NoCandidatesError, match=r"inside the repository .*repo \(try --no-git\)"):
+        resolve(
+            "",
+            repo / "src",
+            git_only=True,
+            include_hidden=False,
+            ignore=(),
+            walker=FakeWalker([]),
+            picker=FakePicker(None),
+        )

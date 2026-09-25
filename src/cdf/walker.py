@@ -6,6 +6,8 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Protocol
 
+from cdf.errors import CdfError
+
 # Never worth listing or descending into, whatever the user's ignore patterns say.
 _ALWAYS_PRUNED = ".git"
 
@@ -38,7 +40,15 @@ class FilesystemWalker:
         include_hidden: bool,
         ignore: Collection[str],
     ) -> Iterator[Path]:
-        for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+        def on_error(error: OSError) -> None:
+            # Unreadable subdirectories are skipped, but an unreadable root
+            # would otherwise masquerade as an empty tree.
+            if error.filename is not None and Path(error.filename) == root:
+                raise CdfError(f"cannot read search root {root}: {error.strerror}") from error
+
+        for dirpath, dirnames, filenames in os.walk(
+            root, topdown=True, onerror=on_error, followlinks=False
+        ):
             current = Path(dirpath)
             is_repo = ".git" in dirnames or ".git" in filenames
 
@@ -49,12 +59,17 @@ class FilesystemWalker:
             ]
             dirnames.sort()
 
-            if current == root:
-                continue
-
-            if git_only:
-                if is_repo:
+            if current != root:
+                if git_only and is_repo:
                     yield current
                     dirnames[:] = []
-            else:
-                yield current
+                    continue
+                if not git_only:
+                    yield current
+
+            # os.walk never descends into symlinked directories (so no loops),
+            # but they are still valid places to cd into: offer them as leaves.
+            for name in dirnames:
+                link = current / name
+                if link.is_symlink() and (not git_only or (link / ".git").exists()):
+                    yield link

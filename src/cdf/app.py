@@ -24,7 +24,23 @@ def resolve(
     # of an empty picker; the rest keeps streaming lazily into the picker.
     first = next(candidates, None)
     if first is None:
-        if git_only:
-            raise NoCandidatesError(f"no git repositories found under {root} (try --no-git)")
-        raise NoCandidatesError(f"no directories found under {root}")
+        raise NoCandidatesError(_no_candidates_message(root, git_only=git_only))
     return picker.pick(itertools.chain([first], candidates), term)
+
+
+def _enclosing_repo(root: Path) -> Path | None:
+    return next((path for path in (root, *root.parents) if (path / ".git").exists()), None)
+
+
+def _no_candidates_message(root: Path, *, git_only: bool) -> str:
+    if not git_only:
+        return f"no directories found under {root}"
+    # The walk skips the root itself, so running inside a repo only finds
+    # repos nested in it; say so rather than implying there are none at all.
+    repo = _enclosing_repo(root)
+    if repo is not None:
+        return (
+            f"no nested git repositories found under {root}, which is inside the "
+            f"repository {repo} (try --no-git)"
+        )
+    return f"no git repositories found under {root} (try --no-git)"

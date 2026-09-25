@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import contextlib
 import os
 import shutil
 import subprocess
 import threading
 from collections.abc import Iterable
 from pathlib import Path
-from typing import IO, Protocol
+from typing import Protocol
 
 from cdf.errors import CdfError
 
@@ -20,17 +19,34 @@ class Picker(Protocol):
     def pick(self, candidates: Iterable[Path], term: str) -> Path | None: ...
 
 
-def _feed(stdin: IO[bytes], candidates: Iterable[Path], seen: list[Path]) -> None:
+def _feed(
+    process: subprocess.Popen[bytes],
+    candidates: Iterable[Path],
+    seen: list[Path],
+    errors: list[Exception],
+) -> None:
     # Each entry is "<index>\t<path>". fzf only shows/matches the path (see
     # --with-nth) but echoes the whole entry back, so the index maps the pick to
     # the exact original Path even when fzf can't round-trip its bytes (fzf
     # replaces non-UTF-8 bytes in names). fzf closes its end as soon as the
     # user picks something; a still-running walk then hits a broken pipe,
     # which just means "stop feeding".
-    with stdin, contextlib.suppress(BrokenPipeError):
+    stdin = process.stdin
+    assert stdin is not None
+    try:
         for candidate in candidates:
             seen.append(candidate)
             stdin.write(b"%d\t%s\0" % (len(seen) - 1, os.fsencode(candidate)))
+    except BrokenPipeError:
+        pass
+    except Exception as exc:
+        # Don't leave fzf showing a silently truncated list: stop it (before
+        # closing its input, so it can't finish normally) and let pick()
+        # report what went wrong.
+        errors.append(exc)
+        process.kill()
+    finally:
+        stdin.close()
 
 
 def _parse_selection(output: bytes, seen: list[Path]) -> Path | None:
@@ -74,8 +90,11 @@ class FzfPicker:
         )
         assert process.stdin is not None and process.stdout is not None
         seen: list[Path] = []
+        errors: list[Exception] = []
         # Daemon thread: once fzf exits we return without waiting for the walk.
-        feeder = threading.Thread(target=_feed, args=(process.stdin, candidates, seen), daemon=True)
+        feeder = threading.Thread(
+            target=_feed, args=(process, candidates, seen, errors), daemon=True
+        )
         feeder.start()
 
         try:
@@ -88,6 +107,8 @@ class FzfPicker:
 
         if returncode == _EXIT_MATCHED:
             return _parse_selection(output, seen)
+        if errors:
+            raise CdfError(f"directory walk failed: {errors[0]}") from errors[0]
         if returncode in (_EXIT_NO_MATCH, _EXIT_INTERRUPTED):
             return None
         raise CdfError(f"fzf exited with status {returncode}")

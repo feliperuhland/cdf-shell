@@ -286,3 +286,25 @@ def test_init_fish_prints_fish_wrapper(capsys: pytest.CaptureFixture[str]) -> No
     assert exit_code == 0
     assert out.startswith("# cdf shell integration for fish")
     assert "function cdf" in out
+
+
+@pytest.mark.parametrize("abbreviation", ["--ver", "--he", "--in"])
+def test_long_options_cannot_be_abbreviated(
+    abbreviation: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main([abbreviation])
+
+    assert exc_info.value.code == 2
+    assert capsys.readouterr().out == ""
+
+
+def test_help_lists_none_when_no_default_config_paths(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli, "default_config_paths", lambda: ())
+
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+
+    assert "first existing of none" in " ".join(capsys.readouterr().out.split())

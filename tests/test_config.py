@@ -142,6 +142,52 @@ def test_default_config_paths_prefer_xdg_config_home(
     )
 
 
+def test_relative_xdg_config_home_is_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", "relative/dir")
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    assert default_config_paths()[0] == tmp_path / ".config" / "cdf" / "cdf.conf"
+
+
+def _no_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    def raise_no_home() -> Path:
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr("cdf.config.Path.home", raise_no_home)
+    monkeypatch.setattr("cdf.config.Path.expanduser", lambda self: raise_no_home())
+
+
+def test_default_config_paths_without_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _no_home(monkeypatch)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    assert default_config_paths() == ()
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert default_config_paths() == (tmp_path / "cdf" / "cdf.conf",)
+
+
+def test_resolve_config_without_any_default_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("cdf.config.default_config_paths", lambda: ())
+    monkeypatch.chdir(tmp_path)
+
+    assert resolve_config().path == tmp_path
+
+
+def test_unexpandable_tilde_in_config_path_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "cdf.conf"
+    config_file.write_text('path = "~/projects"\n')
+    _no_home(monkeypatch)
+
+    with pytest.raises(CdfError, match="cannot expand '~'"):
+        resolve_config(config_path=config_file)
+
+
 def test_default_config_paths_fall_back_to_dot_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
