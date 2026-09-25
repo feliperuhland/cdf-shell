@@ -21,6 +21,12 @@ jobs:
       matrix:
         # Oldest supported (requires-python) through newest, exact patch releases.
         python: ["3.11.16", "3.12.14", "3.13.15", "3.14.7"]
+        # Latest fzf everywhere, plus the oldest supported one (Ubuntu 24.04's)
+        # once; the real-fzf picker tests skip if fzf is missing, so it's pinned.
+        fzf: ["0.74.4"]
+        include:
+          - python: "3.11.16"
+            fzf: "0.44.1"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -56,6 +62,24 @@ jobs:
           tar -xf "$RUNNER_TEMP/fish.tar.xz" -C "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/fish" --version
+
+      - name: Install fzf ${{ matrix.fzf }}
+        env:
+          FZF_VERSION: ${{ matrix.fzf }}
+        run: |
+          # Release tags changed from "X.Y.Z" to "vX.Y.Z" along the way.
+          case "$FZF_VERSION" in
+            0.44.1) tag=0.44.1; sha=73d7946f08dae8a330f4233e3eeb71c4ffc411412e3fe8488d608dde3f7a74bd ;;
+            0.74.4) tag=v0.74.4; sha=05e6813a337cc722c3ed07e54a764b75cc5d671e2e60459db0ba696ee5fa7504 ;;
+            *) echo "::error::no pinned checksum for fzf $FZF_VERSION"; exit 1 ;;
+          esac
+          curl -fsSL -o "$RUNNER_TEMP/fzf.tar.gz" \
+            "https://github.com/junegunn/fzf/releases/download/${tag}/fzf-${FZF_VERSION}-linux_amd64.tar.gz"
+          echo "${sha}  $RUNNER_TEMP/fzf.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf "$RUNNER_TEMP/fzf.tar.gz" -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/fzf" --version | grep -q "^${FZF_VERSION} "
 
       - name: Run test suite
         run: make test

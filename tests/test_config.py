@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -118,6 +119,7 @@ def test_explicit_missing_config_file_raises_cdf_error(tmp_path: Path) -> None:
         resolve_config(config_path=missing)
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores permission bits")
 def test_unreadable_config_file_raises_cdf_error(tmp_path: Path) -> None:
     config_file = tmp_path / "cdf.conf"
     config_file.write_text("git = false\n")

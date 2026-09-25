@@ -50,7 +50,10 @@ def _run_wrapper(
         "FAKE_CDF_CODE": str(code),
         "CDPATH": str(tmp_path / "cdpath"),
     }
-    script = f'source "{wrapper}"; cdf {args}; echo "status=$?"; pwd'
+    # The alias is defined *before* the wrapper, like in a real rc file.
+    prelude = "shopt -s expand_aliases; " if shell == "bash" else ""
+    prelude += "alias cd='echo HIJACKED'; "
+    script = f'{prelude}source "{wrapper}"; cdf {args}; echo "status=$?"; pwd'
     return subprocess.run(
         [*_SHELLS[shell], "-c", script],
         cwd=tmp_path,

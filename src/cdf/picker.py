@@ -8,6 +8,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Protocol
 
+from cdf.display import printable
 from cdf.errors import CdfError
 
 _EXIT_MATCHED = 0
@@ -19,16 +20,23 @@ class Picker(Protocol):
     def pick(self, candidates: Iterable[Path], term: str) -> Path | None: ...
 
 
+def _display(path: Path) -> bytes:
+    # What fzf shows and matches: the path with control characters (escape
+    # sequences, newlines, tabs) neutralised. Never used to resolve the pick
+    # except as a fallback; the index maps back to the exact original Path.
+    return os.fsencode(printable(os.fspath(path)))
+
+
 def _feed(
     process: subprocess.Popen[bytes],
     candidates: Iterable[Path],
     seen: list[Path],
     errors: list[Exception],
 ) -> None:
-    # Each entry is "<index>\t<path>". fzf only shows/matches the path (see
-    # --with-nth) but echoes the whole entry back, so the index maps the pick to
-    # the exact original Path even when fzf can't round-trip its bytes (fzf
-    # replaces non-UTF-8 bytes in names). fzf closes its end as soon as the
+    # Each entry is "<index>\t<display>". fzf only shows/matches the display
+    # (see --with-nth) but echoes the whole entry back, so the index maps the
+    # pick to the exact original Path even when fzf can't round-trip its bytes
+    # (fzf replaces non-UTF-8 bytes in names). fzf closes its end as soon as the
     # user picks something; a still-running walk then hits a broken pipe,
     # which just means "stop feeding".
     stdin = process.stdin
@@ -36,7 +44,7 @@ def _feed(
     try:
         for candidate in candidates:
             seen.append(candidate)
-            stdin.write(b"%d\t%s\0" % (len(seen) - 1, os.fsencode(candidate)))
+            stdin.write(b"%d\t%s\0" % (len(seen) - 1, _display(candidate)))
     except BrokenPipeError:
         pass
     except Exception as exc:
@@ -55,14 +63,29 @@ def _parse_selection(output: bytes, seen: list[Path]) -> Path | None:
     entries = [entry for entry in output.split(b"\0") if entry]
     if not entries:
         return None
-    index, _, _ = entries[-1].partition(b"\t")
-    try:
-        selected = seen[int(index)]
-    except (ValueError, IndexError) as exc:
-        raise CdfError(f"unexpected output from fzf: {entries[-1]!r}") from exc
+    entry = entries[-1]
+    selected = _by_index(entry, seen) or _by_display(entry, seen)
+    if selected is None:
+        raise CdfError(f"unexpected output from fzf: {entry!r}")
     if not selected.is_dir():
         raise CdfError(f"selected directory no longer exists: {selected}")
     return selected
+
+
+def _by_index(entry: bytes, seen: list[Path]) -> Path | None:
+    index, tab, _ = entry.partition(b"\t")
+    if not tab or not index.isdigit() or int(index) >= len(seen):
+        return None
+    return seen[int(index)]
+
+
+def _by_display(entry: bytes, seen: list[Path]) -> Path | None:
+    # Fallback for an --accept-nth in FZF_DEFAULT_OPTS that prints only the
+    # display field. (Overriding it with --accept-nth ourselves would break
+    # fzf < 0.60, which rejects the option.) Displays never contain a tab, so
+    # this can't be confused with the index form; ambiguity is refused.
+    matches = [path for path in seen if _display(path) == entry]
+    return matches[0] if len(matches) == 1 else None
 
 
 class FzfPicker:

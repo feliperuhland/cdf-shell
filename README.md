@@ -10,8 +10,13 @@ select.
   it finds one (pass `--no-git` to walk every directory instead).
 - Symlinked directories are listed (in git mode, only if they point at a
   repository) but never descended into, so symlink loops can't hang the walk.
-- Selection is powered by [`fzf`](https://github.com/junegunn/fzf), which
-  must be on `PATH`.
+- Selection is powered by [`fzf`](https://github.com/junegunn/fzf) 0.44 or
+  newer, which must be on `PATH`. Your `FZF_DEFAULT_OPTS` (theme, layout,
+  `--print-query`, `--accept-nth`, ...) are respected.
+- Directory names are shown with terminal control characters (escape
+  sequences, newlines, tabs) replaced by `?`, so a hostile name in a cloned
+  repo can't mess with your terminal; the directory you pick is still the
+  exact one on disk.
 
 ## Install
 

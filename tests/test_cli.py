@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 
@@ -308,3 +309,28 @@ def test_help_lists_none_when_no_default_config_paths(
         cli.main(["--help"])
 
     assert "first existing of none" in " ".join(capsys.readouterr().out.split())
+
+
+def test_non_utf8_target_is_written_as_raw_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfdbinary: pytest.CaptureFixture[bytes]
+) -> None:
+    target = Path(os.fsdecode(os.fsencode(tmp_path) + b"/bad\xff"))
+    monkeypatch.setattr(cli, "resolve", lambda *args, **kwargs: target)
+
+    exit_code = cli.main(["--path", str(tmp_path)])
+
+    assert exit_code == 0
+    assert capfdbinary.readouterr().out == os.fsencode(tmp_path) + b"/bad\xff\n"
+
+
+def test_error_messages_never_echo_control_characters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def fake_resolve(*args: object, **kwargs: object) -> Path | None:
+        raise NoCandidatesError("no repos under /x\x1b]0;pwned\x07")
+
+    monkeypatch.setattr(cli, "resolve", fake_resolve)
+
+    cli.main(["--path", str(tmp_path)])
+
+    assert capsys.readouterr().err == "no repos under /x?]0;pwned?\n"

@@ -7,7 +7,7 @@ pkgdesc="Interactively search the directory tree below the cwd and cd into the r
 arch=('any')
 url="https://github.com/feliperuhland/cdf-shell"
 license=('MIT')
-depends=('python' 'fzf')
+depends=('python' 'fzf>=0.44')
 makedepends=('python-build' 'python-hatchling' 'python-installer')
 checkdepends=('python-pytest')
 _pkgsrc="${pkgname}-${pkgver}"

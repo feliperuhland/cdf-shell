@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -81,7 +82,9 @@ def test_pick_streams_nul_delimited_input(tmp_path: Path, fake_fzf: FakeFzf) -> 
 
     result = FzfPicker().pick(iter([weird, Path("/normal")]), "")
 
-    assert fake_fzf.input == b"0\t" + os.fsencode(weird) + b"\0" + b"1\t/normal\0"
+    # fzf sees the newline as "?" (display only); the pick maps back exactly.
+    shown = os.fsencode(tmp_path) + b"/weird?name"
+    assert fake_fzf.input == b"0\t" + shown + b"\0" + b"1\t/normal\0"
     assert result == weird
 
 
@@ -210,3 +213,113 @@ def test_walk_failure_stops_fzf_and_is_reported(tmp_path: Path, fake_fzf: FakeFz
 
     with pytest.raises(CdfError, match="directory walk failed: disk on fire"):
         FzfPicker().pick(failing_walk(), "")
+
+
+def test_pick_shows_control_characters_as_question_marks(tmp_path: Path, fake_fzf: FakeFzf) -> None:
+    evil = tmp_path / "evil\x1b]0;title\x07\x9bred"
+    evil.mkdir()
+    fake_fzf.respond(0, b"0\t\0")
+
+    result = FzfPicker().pick([evil], "")
+
+    assert fake_fzf.input == b"0\t" + os.fsencode(tmp_path) + b"/evil?]0;title??red\0"
+    assert result == evil
+
+
+def test_pick_falls_back_to_display_when_accept_nth_drops_index(
+    tmp_path: Path, fake_fzf: FakeFzf
+) -> None:
+    # e.g. FZF_DEFAULT_OPTS=--accept-nth=2 prints only the display field.
+    first, second = tmp_path / "a\tb", tmp_path / "c"
+    first.mkdir()
+    second.mkdir()
+    fake_fzf.respond(0, os.fsencode(tmp_path) + b"/a?b\0")
+
+    assert FzfPicker().pick([first, second], "") == first
+
+
+def test_pick_refuses_ambiguous_display_fallback(tmp_path: Path, fake_fzf: FakeFzf) -> None:
+    # Two names that only differ in a control character look the same.
+    first, second = tmp_path / "a\x01", tmp_path / "a\x02"
+    first.mkdir()
+    second.mkdir()
+    fake_fzf.respond(0, os.fsencode(tmp_path) + b"/a?\0")
+
+    with pytest.raises(CdfError, match="unexpected output from fzf"):
+        FzfPicker().pick([first, second], "")
+
+
+# --- Against the real fzf ---------------------------------------------------
+# The index/--with-nth protocol depends on fzf's actual behaviour, so these
+# drive the installed fzf non-interactively: --filter (injected through
+# FZF_DEFAULT_OPTS, as a user's defaults would be) prints the matches instead
+# of opening the UI. CI runs them against the oldest supported and the latest
+# fzf.
+
+
+@pytest.fixture
+def real_fzf(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
+    if shutil.which("fzf") is None:
+        pytest.skip("fzf not installed")
+    monkeypatch.delenv("FZF_DEFAULT_OPTS_FILE", raising=False)
+
+    def use_options(options: str) -> None:
+        monkeypatch.setenv("FZF_DEFAULT_OPTS", options)
+
+    return use_options
+
+
+def _fzf_supports(option: str) -> bool:
+    probe = subprocess.run(["fzf", option, "--filter=x"], input=b"", capture_output=True)
+    return b"unknown option" not in probe.stderr
+
+
+def test_real_fzf_picks_exact_path(tmp_path: Path, real_fzf: Callable[[str], None]) -> None:
+    other, wanted = tmp_path / "other", tmp_path / "wanted"
+    other.mkdir()
+    wanted.mkdir()
+    real_fzf("--exact --filter=wanted")
+
+    assert FzfPicker().pick([other, wanted], "") == wanted
+
+
+def test_real_fzf_round_trips_hostile_names(
+    tmp_path: Path, real_fzf: Callable[[str], None]
+) -> None:
+    raw = os.fsencode(tmp_path) + b"/zz-bad\xff\x1b]0;x\x07"
+    os.mkdir(raw)
+    hostile = Path(os.fsdecode(raw))
+    (tmp_path / "plain").mkdir()
+    real_fzf("--exact --filter=zz-bad")
+
+    assert FzfPicker().pick([tmp_path / "plain", hostile], "") == hostile
+
+
+def test_real_fzf_does_not_match_the_hidden_index(
+    tmp_path: Path, real_fzf: Callable[[str], None]
+) -> None:
+    (tmp_path / "abc").mkdir()
+    # "^0" matches only if the line starts with the index, i.e. if --with-nth
+    # failed to hide it (every display starts with "/").
+    real_fzf("--exact --filter=^0")
+
+    assert FzfPicker().pick([tmp_path / "abc"], "") is None
+
+
+def test_real_fzf_tolerates_print_query(tmp_path: Path, real_fzf: Callable[[str], None]) -> None:
+    wanted = tmp_path / "wanted"
+    wanted.mkdir()
+    real_fzf("--exact --filter=wanted --print-query")
+
+    assert FzfPicker().pick([wanted], "") == wanted
+
+
+def test_real_fzf_tolerates_accept_nth(tmp_path: Path, real_fzf: Callable[[str], None]) -> None:
+    if not _fzf_supports("--accept-nth=2"):
+        pytest.skip("this fzf predates --accept-nth")
+    other, wanted = tmp_path / "other", tmp_path / "wanted"
+    other.mkdir()
+    wanted.mkdir()
+    real_fzf("--exact --filter=wanted --accept-nth=2")
+
+    assert FzfPicker().pick([other, wanted], "") == wanted

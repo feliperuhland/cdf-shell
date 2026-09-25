@@ -9,6 +9,7 @@ from pathlib import Path
 
 from cdf.app import resolve
 from cdf.config import default_config_paths, resolve_config
+from cdf.display import printable
 from cdf.errors import CdfError, NoCandidatesError
 from cdf.picker import FzfPicker, Picker
 from cdf.walker import DirectoryWalker, FilesystemWalker
@@ -147,16 +148,21 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         return _EXIT_INTERRUPTED
     except NoCandidatesError as exc:
-        print(str(exc), file=sys.stderr)
+        # Messages can embed directory names; never echo control characters.
+        print(printable(str(exc)), file=sys.stderr)
         return _EXIT_NO_SELECTION
     except CdfError as exc:
-        print(str(exc), file=sys.stderr)
+        print(printable(str(exc)), file=sys.stderr)
         return _EXIT_ERROR
 
     if target is None:
         return _EXIT_NO_SELECTION
 
-    print(target)
+    # Raw bytes: a non-UTF-8 name can't go through the text layer under a
+    # strict locale (e.g. en_US.UTF-8), and the shell needs the exact bytes.
+    sys.stdout.flush()
+    sys.stdout.buffer.write(os.fsencode(target) + b"\n")
+    sys.stdout.buffer.flush()
     return _EXIT_SELECTED
 
 

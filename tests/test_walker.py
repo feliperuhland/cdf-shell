@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from cdf.errors import CdfError
 from cdf.walker import FilesystemWalker
+
+requires_non_root = pytest.mark.skipif(
+    os.geteuid() == 0, reason="root ignores permission bits, so chmod 000 has no effect"
+)
 
 
 @pytest.fixture
@@ -124,6 +129,7 @@ def test_results_are_sorted_per_level(tmp_path: Path, walker: FilesystemWalker) 
     assert result == [tmp_path / "a", tmp_path / "b", tmp_path / "c"]
 
 
+@requires_non_root
 def test_unreadable_root_raises(tmp_path: Path, walker: FilesystemWalker) -> None:
     root = tmp_path / "locked"
     _make_repo(root / "repo")
@@ -136,6 +142,7 @@ def test_unreadable_root_raises(tmp_path: Path, walker: FilesystemWalker) -> Non
         root.chmod(0o755)
 
 
+@requires_non_root
 def test_unreadable_subdirectory_is_skipped(tmp_path: Path, walker: FilesystemWalker) -> None:
     locked = tmp_path / "locked"
     locked.mkdir()
@@ -209,3 +216,43 @@ def test_hidden_and_ignored_symlinks_are_pruned(tmp_path: Path, walker: Filesyst
     result = set(walker.walk(root, git_only=False, include_hidden=False, ignore=("node_modules",)))
 
     assert result == set()
+
+
+@requires_non_root
+def test_symlink_into_unsearchable_directory_is_skipped(
+    tmp_path: Path, walker: FilesystemWalker
+) -> None:
+    locked = tmp_path / "locked"
+    (locked / "target").mkdir(parents=True)
+    root = tmp_path / "root"
+    (root / "ok").mkdir(parents=True)
+    (root / "link").symlink_to(locked / "target")
+    locked.chmod(0o000)
+
+    try:
+        result = set(walker.walk(root, git_only=False, include_hidden=False, ignore=()))
+    finally:
+        locked.chmod(0o755)
+
+    assert result == {root / "ok"}
+
+
+@requires_non_root
+def test_git_mode_symlink_to_unsearchable_directory_is_skipped(
+    tmp_path: Path, walker: FilesystemWalker
+) -> None:
+    # Like /usr/lib/ssl/private: the link target itself can be stat'ed, but
+    # checking for a .git inside it raises PermissionError (Python 3.12+).
+    private = tmp_path / "private"
+    private.mkdir()
+    root = tmp_path / "root"
+    _make_repo(root / "repo")
+    (root / "link").symlink_to(private)
+    private.chmod(0o000)
+
+    try:
+        result = set(walker.walk(root, git_only=True, include_hidden=False, ignore=()))
+    finally:
+        private.chmod(0o755)
+
+    assert result == {root / "repo"}
