@@ -1,14 +1,26 @@
 # cdf shell integration for bash and zsh. Load it with:
 #   eval "$(command cdf --init bash)"   # or: --init zsh
 cdf() {
-  case " $* " in
-    *" --help "* | *" -h "* | *" --version "* | *" --init "* | *" --init="*)
-      command cdf "$@"
-      return
-      ;;
-  esac
+  # Look at each argument on its own (not "$*", which depends on IFS and would
+  # also match a quoted search term like "foo -h bar"); stop at "--", after
+  # which everything is search text.
+  local arg
+  for arg in "$@"; do
+    case $arg in
+      --) break ;;
+      --help | -h | --version | --init | --init=*)
+        command cdf "$@"
+        return
+        ;;
+    esac
+  done
   local target
-  target="$(command cdf "$@")" || return
+  # $(...) strips *all* trailing newlines, including ones that are part of
+  # the directory name, so append a "." and then remove it plus the single
+  # newline cdf prints after the path.
+  target="$(command cdf "$@" && printf .)" || return
+  target="${target%.}"
+  target="${target%?}"
   # Only ever cd into a real directory; anything else (e.g. help text from
   # combined short flags like -ah) is printed instead.
   if [ -d "$target" ]; then

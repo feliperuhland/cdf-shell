@@ -34,7 +34,7 @@ def shell(request: pytest.FixtureRequest) -> str:
 
 
 def _run_wrapper(
-    shell: str, tmp_path: Path, args: str, *, out: str, code: int = 0
+    shell: str, tmp_path: Path, args: str, *, out: str, code: int = 0, ifs: str | None = None
 ) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -53,6 +53,8 @@ def _run_wrapper(
     # The alias is defined *before* the wrapper, like in a real rc file.
     prelude = "shopt -s expand_aliases; " if shell == "bash" else ""
     prelude += "alias cd='echo HIJACKED'; "
+    if ifs is not None:
+        prelude += f"IFS='{ifs}'; "
     script = f'{prelude}source "{wrapper}"; cdf {args}; echo "status=$?"; pwd'
     return subprocess.run(
         [*_SHELLS[shell], "-c", script],
@@ -114,3 +116,30 @@ def test_prints_non_directory_output_instead_of_cd(shell: str, tmp_path: Path) -
         str(tmp_path),
     ]
     assert result.stderr == ""
+
+
+def test_target_ending_in_newline_is_not_confused_with_sibling(shell: str, tmp_path: Path) -> None:
+    # $(...) strips trailing newlines; "innocent\n" must not land in "innocent".
+    (tmp_path / "innocent").mkdir()
+    target = tmp_path / "innocent\n"
+    target.mkdir()
+
+    result = _run_wrapper(shell, tmp_path, "", out=str(target))
+
+    assert result.stdout == f"status=0\n{target}\n"
+
+
+@pytest.mark.parametrize("args", ['"foo -h bar"', "-- -h", "-- --init"])
+def test_flag_lookalikes_in_search_text_still_cd(shell: str, tmp_path: Path, args: str) -> None:
+    target = tmp_path / "repo"
+    target.mkdir()
+
+    result = _run_wrapper(shell, tmp_path, args, out=str(target))
+
+    assert result.stdout.splitlines() == ["status=0", str(target)]
+
+
+def test_passthrough_does_not_depend_on_ifs(shell: str, tmp_path: Path) -> None:
+    result = _run_wrapper(shell, tmp_path, "foo --help", out="usage", ifs=":")
+
+    assert result.stdout.splitlines() == ["usage", "status=0", str(tmp_path)]

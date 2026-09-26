@@ -96,3 +96,24 @@ def test_prints_non_directory_output_instead_of_cd(tmp_path: Path) -> None:
         str(tmp_path),
     ]
     assert result.stderr == ""
+
+
+def test_target_ending_in_newline_is_not_confused_with_sibling(tmp_path: Path) -> None:
+    # Command substitution drops trailing newlines; "innocent\n" must not land in "innocent".
+    (tmp_path / "innocent").mkdir()
+    target = tmp_path / "innocent\n"
+    target.mkdir()
+
+    result = _run_wrapper(tmp_path, "", out=str(target))
+
+    assert result.stdout == f"status=0\n{target}\n"
+
+
+@pytest.mark.parametrize("args", ["'foo -h bar'", "-- -h", "-- --init"])
+def test_flag_lookalikes_in_search_text_still_cd(tmp_path: Path, args: str) -> None:
+    target = tmp_path / "repo"
+    target.mkdir()
+
+    result = _run_wrapper(tmp_path, args, out=str(target))
+
+    assert result.stdout.splitlines() == ["status=0", str(target)]
