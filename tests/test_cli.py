@@ -373,3 +373,29 @@ def test_init_to_closed_stdout_exits_two(
     monkeypatch.setattr(sys, "stdout", closed_stdout)
 
     assert cli.main(["--init", "bash"]) == 2
+
+
+def test_depth_and_file_system_flags_reach_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured_kwargs: dict[str, object] = {}
+
+    def fake_resolve(term: str, root: Path, **kwargs: object) -> Path | None:
+        captured_kwargs.update(kwargs)
+        return None
+
+    monkeypatch.setattr(cli, "resolve", fake_resolve)
+
+    cli.main(["-d", "2", "-x", "--path", str(tmp_path)])
+
+    assert captured_kwargs["max_depth"] == 2
+    assert captured_kwargs["one_file_system"] is True
+
+
+@pytest.mark.parametrize("value", ["-1", "two"])
+def test_max_depth_rejects_bad_values(value: str, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main([f"--max-depth={value}"])
+
+    assert exc_info.value.code == 2
+    assert "expected a non-negative integer" in capsys.readouterr().err

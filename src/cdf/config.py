@@ -9,7 +9,7 @@ from typing import Any
 from cdf.errors import CdfError
 
 DEFAULT_IGNORE = ("node_modules", "__pycache__", ".venv")
-_KNOWN_KEYS = {"path", "git", "hidden", "ignore"}
+_KNOWN_KEYS = {"path", "git", "hidden", "ignore", "max_depth", "one_file_system"}
 
 
 @dataclass(frozen=True)
@@ -18,6 +18,8 @@ class Config:
     git: bool = True
     hidden: bool = False
     ignore: tuple[str, ...] = field(default=DEFAULT_IGNORE)
+    max_depth: int | None = None
+    one_file_system: bool = False
 
 
 def _home() -> Path | None:
@@ -97,13 +99,20 @@ def _file_overrides(file_data: dict[str, object], config_path: Path) -> dict[str
             raise CdfError(f"{config_path}: cannot expand '~' in 'path': {exc}") from exc
         overrides["path"] = config_path.parent / expanded
 
-    for key in ("git", "hidden"):
+    for key in ("git", "hidden", "one_file_system"):
         if key in file_data:
             value = file_data[key]
             if not isinstance(value, bool):
                 type_name = type(value).__name__
                 raise CdfError(f"{config_path}: '{key}' must be a boolean, got {type_name}")
             overrides[key] = value
+
+    if "max_depth" in file_data:
+        value = file_data["max_depth"]
+        # bool is a subclass of int, so `max_depth = true` needs its own check.
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise CdfError(f"{config_path}: 'max_depth' must be a non-negative integer")
+        overrides["max_depth"] = value
 
     if "ignore" in file_data:
         patterns = file_data["ignore"]
@@ -123,9 +132,19 @@ def _file_overrides(file_data: dict[str, object], config_path: Path) -> dict[str
 
 
 def _cli_overrides(
-    cli_path: Path | None, cli_git: bool | None, cli_hidden: bool | None
+    cli_path: Path | None,
+    cli_git: bool | None,
+    cli_hidden: bool | None,
+    cli_max_depth: int | None,
+    cli_one_file_system: bool | None,
 ) -> dict[str, Any]:
-    candidates = {"path": cli_path, "git": cli_git, "hidden": cli_hidden}
+    candidates = {
+        "path": cli_path,
+        "git": cli_git,
+        "hidden": cli_hidden,
+        "max_depth": cli_max_depth,
+        "one_file_system": cli_one_file_system,
+    }
     return {key: value for key, value in candidates.items() if value is not None}
 
 
@@ -135,14 +154,22 @@ def resolve_config(
     cli_path: Path | None = None,
     cli_git: bool | None = None,
     cli_hidden: bool | None = None,
+    cli_max_depth: int | None = None,
+    cli_one_file_system: bool | None = None,
 ) -> Config:
     resolved_config_path = config_path or _first_existing_default(default_config_paths())
     file_overrides: dict[str, Any] = {}
     if resolved_config_path is not None:
         file_data = load_config_file(resolved_config_path)
         file_overrides = _file_overrides(file_data, resolved_config_path)
-    overrides = {**file_overrides, **_cli_overrides(cli_path, cli_git, cli_hidden)}
+    cli_overrides = _cli_overrides(
+        cli_path, cli_git, cli_hidden, cli_max_depth, cli_one_file_system
+    )
+    overrides = {**file_overrides, **cli_overrides}
     root = _absolute(overrides.pop("path", None))
+    # 0 means "no limit", so a CLI flag can lift a limit set in the file.
+    if overrides.get("max_depth") == 0:
+        overrides["max_depth"] = None
     config = Config(path=root, **overrides)
 
     if not config.path.is_dir():

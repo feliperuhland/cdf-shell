@@ -63,7 +63,8 @@ by adding `.venv/bin` to `PATH`).
 ## Usage
 
 ```sh
-cdf [term ...] [-p/--path ROOT] [--git/--no-git] [-a/--all|--no-all] [-c/--config FILE]
+cdf [term ...] [-p/--path ROOT] [--git/--no-git] [-a/--all|--no-all] [-d/--max-depth N]
+    [-x/--one-file-system|--no-one-file-system] [-c/--config FILE]
 cdf --init {bash,zsh,fish}
 ```
 
@@ -73,6 +74,8 @@ cdf --init {bash,zsh,fish}
 | `-p, --path` | cwd | root to search from |
 | `--git` / `--no-git` | `--git` | only match git repository roots |
 | `-a, --all` / `--no-all` | `--no-all` | include hidden/dot directories |
+| `-d, --max-depth N` | no limit | only look `N` levels below the root (`0` = no limit, to lift a limit set in the config file) |
+| `-x, --one-file-system` / `--no-one-file-system` | off | list mount points but don't descend into them, like `find -xdev` |
 | `-c, --config` | `$CDF_CONFIG_PATH`, else first existing default | config file path |
 | `--init SHELL` | | print the shell integration for `bash`, `zsh` or `fish` and exit |
 
@@ -106,11 +109,18 @@ path = "~/projects"  # string, expanded with ~; relative paths are relative to t
 git = true            # boolean
 hidden = false        # boolean
 ignore = ["node_modules", "__pycache__", ".venv"]  # glob patterns of directory names to skip
+max_depth = 0        # non-negative integer, 0 = no limit
+one_file_system = false  # boolean
 ```
 
 `ignore` replaces the default list shown above (set `ignore = []` to skip
 nothing). Patterns match one directory name at a time, so they can't contain
 `/`. `.git` directories are never descended into regardless.
+
+`one_file_system` is off by default because btrfs subvolumes (and some other
+setups) report their own device IDs, so turning it on would hide those
+directories. Turn it on if you run `cdf --no-git` from places like `/` or `~`
+that have network or FUSE mounts below them, which can be slow or hang.
 
 Unknown keys, and values of the wrong type (e.g. `git = "false"` instead of
 `git = false`), are rejected with an error, to catch typos early.

@@ -301,3 +301,39 @@ def test_ignore_pattern_with_slash_raises(tmp_path: Path) -> None:
 
     with pytest.raises(CdfError, match="can't contain '/': vendor/cache$"):
         resolve_config(config_path=config_file)
+
+
+def test_max_depth_and_one_file_system_from_file(tmp_path: Path) -> None:
+    config_file = tmp_path / "cdf.conf"
+    config_file.write_text("max_depth = 3\none_file_system = true\n")
+
+    config = resolve_config(config_path=config_file)
+
+    assert config.max_depth == 3
+    assert config.one_file_system is True
+
+
+def test_max_depth_and_one_file_system_defaults() -> None:
+    config = resolve_config()
+
+    assert config.max_depth is None
+    assert config.one_file_system is False
+
+
+def test_cli_max_depth_zero_lifts_the_file_limit(tmp_path: Path) -> None:
+    config_file = tmp_path / "cdf.conf"
+    config_file.write_text("max_depth = 3\none_file_system = true\n")
+
+    config = resolve_config(config_path=config_file, cli_max_depth=0, cli_one_file_system=False)
+
+    assert config.max_depth is None
+    assert config.one_file_system is False
+
+
+@pytest.mark.parametrize("value", ["true", "-1", '"3"', "1.5"])
+def test_max_depth_must_be_a_non_negative_integer(tmp_path: Path, value: str) -> None:
+    config_file = tmp_path / "cdf.conf"
+    config_file.write_text(f"max_depth = {value}\n")
+
+    with pytest.raises(CdfError, match="'max_depth' must be a non-negative integer"):
+        resolve_config(config_path=config_file)

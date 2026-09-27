@@ -17,10 +17,19 @@ def resolve(
     git_only: bool,
     include_hidden: bool,
     ignore: Collection[str],
+    max_depth: int | None = None,
+    one_file_system: bool = False,
     walker: DirectoryWalker,
     picker: Picker,
 ) -> Path | None:
-    candidates = walker.walk(root, git_only=git_only, include_hidden=include_hidden, ignore=ignore)
+    candidates = walker.walk(
+        root,
+        git_only=git_only,
+        include_hidden=include_hidden,
+        ignore=ignore,
+        max_depth=max_depth,
+        one_file_system=one_file_system,
+    )
     # Peek at the first candidate so an empty tree gets a clear message instead
     # of an empty picker; the rest keeps streaming lazily into the picker.
     first = next(candidates, None)

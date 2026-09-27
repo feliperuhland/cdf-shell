@@ -13,12 +13,19 @@ from cdf.errors import NoCandidatesError
 class FakeWalker:
     def __init__(self, candidates: list[Path]) -> None:
         self._candidates = candidates
-        self.calls: list[tuple[Path, bool, bool, Collection[str]]] = []
+        self.calls: list[tuple[Path, bool, bool, Collection[str], int | None, bool]] = []
 
     def walk(
-        self, root: Path, *, git_only: bool, include_hidden: bool, ignore: Collection[str]
+        self,
+        root: Path,
+        *,
+        git_only: bool,
+        include_hidden: bool,
+        ignore: Collection[str],
+        max_depth: int | None = None,
+        one_file_system: bool = False,
     ) -> Iterator[Path]:
-        self.calls.append((root, git_only, include_hidden, ignore))
+        self.calls.append((root, git_only, include_hidden, ignore, max_depth, one_file_system))
         yield from self._candidates
 
 
@@ -43,12 +50,14 @@ def test_resolve_wires_walker_and_picker(tmp_path: Path) -> None:
         git_only=True,
         include_hidden=False,
         ignore=("node_modules",),
+        max_depth=3,
+        one_file_system=True,
         walker=walker,
         picker=picker,
     )
 
     assert result == second
-    assert walker.calls == [(tmp_path, True, False, ("node_modules",))]
+    assert walker.calls == [(tmp_path, True, False, ("node_modules",), 3, True)]
     assert picker.calls == [([first, second], "term", tmp_path)]
 
 

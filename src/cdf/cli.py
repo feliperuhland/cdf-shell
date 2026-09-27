@@ -44,6 +44,16 @@ def _resolve_config_path(cli_config: Path | None) -> Path | None:
     return Path(env_config) if env_config else None
 
 
+def _non_negative_int(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        value = -1
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"expected a non-negative integer, got {text!r}")
+    return value
+
+
 def shell_init_script(shell: str) -> str:
     script = resources.files("cdf").joinpath("shell", _INIT_SCRIPTS[shell])
     return script.read_text(encoding="utf-8")
@@ -112,6 +122,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="include hidden/dot directories (default: off)",
     )
     parser.add_argument(
+        "-d",
+        "--max-depth",
+        type=_non_negative_int,
+        default=None,
+        metavar="N",
+        help="only look N levels below the root; 0 = no limit (default: no limit)",
+    )
+    parser.add_argument(
+        "-x",
+        "--one-file-system",
+        dest="one_file_system",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="list mount points but don't descend into them (default: off)",
+    )
+    parser.add_argument(
         "-c",
         "--config",
         type=Path,
@@ -151,6 +177,8 @@ def main(argv: list[str] | None = None) -> int:
             cli_path=args.path,
             cli_git=args.git,
             cli_hidden=args.hidden,
+            cli_max_depth=args.max_depth,
+            cli_one_file_system=args.one_file_system,
         )
         target = resolve(
             " ".join(args.term),
@@ -158,6 +186,8 @@ def main(argv: list[str] | None = None) -> int:
             git_only=config.git,
             include_hidden=config.hidden,
             ignore=config.ignore,
+            max_depth=config.max_depth,
+            one_file_system=config.one_file_system,
             walker=create_walker(),
             picker=create_picker(),
         )
