@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # release.yml runs this same job before building, so the two can't drift.
+  workflow_call:
 
 permissions:
   contents: read
