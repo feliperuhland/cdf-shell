@@ -256,3 +256,48 @@ def test_ignore_must_be_list_of_strings(tmp_path: Path, value: str) -> None:
 
     with pytest.raises(CdfError, match="'ignore' must be a list of strings"):
         resolve_config(config_path=config_file)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores permission bits")
+def test_default_path_under_unsearchable_directory_is_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    locked = tmp_path / "locked"
+    (locked / "cdf").mkdir(parents=True)
+    (locked / "cdf" / "cdf.conf").write_text("git = true\n")
+    fallback = tmp_path / "fallback.conf"
+    fallback.write_text("git = false\n")
+    monkeypatch.setattr(
+        "cdf.config.default_config_paths", lambda: (locked / "cdf" / "cdf.conf", fallback)
+    )
+    locked.chmod(0o000)
+
+    try:
+        config = resolve_config()
+    finally:
+        locked.chmod(0o755)
+
+    assert config.git is False
+
+
+def test_default_path_that_is_a_directory_is_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = tmp_path / "cdf.conf"
+    directory.mkdir()
+    monkeypatch.setattr("cdf.config.default_config_paths", lambda: (directory,))
+
+    assert resolve_config().git is True
+
+
+def test_explicit_config_path_that_is_a_directory_raises(tmp_path: Path) -> None:
+    with pytest.raises(CdfError, match="cannot read config file"):
+        resolve_config(config_path=tmp_path)
+
+
+def test_ignore_pattern_with_slash_raises(tmp_path: Path) -> None:
+    config_file = tmp_path / "cdf.conf"
+    config_file.write_text('ignore = ["target", "vendor/cache"]\n')
+
+    with pytest.raises(CdfError, match="can't contain '/': vendor/cache$"):
+        resolve_config(config_path=config_file)

@@ -107,7 +107,8 @@ ignore = ["node_modules", "__pycache__", ".venv"]  # glob patterns of directory 
 ```
 
 `ignore` replaces the default list shown above (set `ignore = []` to skip
-nothing). `.git` directories are never descended into regardless.
+nothing). Patterns match one directory name at a time, so they can't contain
+`/`. `.git` directories are never descended into regardless.
 
 Unknown keys, and values of the wrong type (e.g. `git = "false"` instead of
 `git = false`), are rejected with an error, to catch typos early.

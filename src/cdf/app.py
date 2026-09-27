@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import itertools
+import os
 from collections.abc import Collection
 from pathlib import Path
 
@@ -29,7 +30,9 @@ def resolve(
 
 
 def _enclosing_repo(root: Path) -> Path | None:
-    return next((path for path in (root, *root.parents) if (path / ".git").exists()), None)
+    # os.path.exists never raises (Path.exists can, on Python < 3.14, for an
+    # unsearchable ancestor); this only picks the wording of a message.
+    return next((path for path in (root, *root.parents) if os.path.exists(path / ".git")), None)
 
 
 def _no_candidates_message(root: Path, *, git_only: bool) -> str:

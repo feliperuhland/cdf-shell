@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import io
 import os
+import sys
+from collections.abc import Iterator
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 
@@ -334,3 +337,39 @@ def test_error_messages_never_echo_control_characters(
     cli.main(["--path", str(tmp_path)])
 
     assert capsys.readouterr().err == "no repos under /x?]0;pwned?\n"
+
+
+@pytest.fixture
+def closed_stdout() -> Iterator[io.TextIOWrapper]:
+    # A pipe whose reader has already exited, like `cdf | head -c0`. Tests
+    # install it themselves: pytest's capture resets sys.stdout after fixtures.
+    read_fd, write_fd = os.pipe()
+    os.close(read_fd)
+    stdout = io.TextIOWrapper(io.FileIO(write_fd, "w"))
+    yield stdout
+    stdout.close()
+
+
+def test_selected_path_to_closed_stdout_exits_two_quietly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    closed_stdout: io.TextIOWrapper,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli, "resolve", lambda *args, **kwargs: tmp_path)
+    monkeypatch.setattr(sys, "stdout", closed_stdout)
+
+    exit_code = cli.main(["--path", str(tmp_path)])
+
+    assert exit_code == 2
+    assert capsys.readouterr().err == ""
+    # stdout now points at /dev/null, so the exit-time flush can't fail again.
+    assert os.path.samestat(os.fstat(closed_stdout.fileno()), os.stat(os.devnull))
+
+
+def test_init_to_closed_stdout_exits_two(
+    monkeypatch: pytest.MonkeyPatch, closed_stdout: io.TextIOWrapper
+) -> None:
+    monkeypatch.setattr(sys, "stdout", closed_stdout)
+
+    assert cli.main(["--init", "bash"]) == 2

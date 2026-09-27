@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Collection, Iterable, Iterator
 from pathlib import Path
 
@@ -87,3 +88,25 @@ def test_no_candidates_inside_a_repo_says_so(tmp_path: Path) -> None:
             walker=FakeWalker([]),
             picker=FakePicker(None),
         )
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores permission bits")
+def test_no_candidates_under_unsearchable_ancestor_still_reports(tmp_path: Path) -> None:
+    locked = tmp_path / "locked"
+    root = locked / "sub"
+    root.mkdir(parents=True)
+    locked.chmod(0o000)
+
+    try:
+        with pytest.raises(NoCandidatesError, match="no git repositories found"):
+            resolve(
+                "",
+                root,
+                git_only=True,
+                include_hidden=False,
+                ignore=(),
+                walker=FakeWalker([]),
+                picker=FakePicker(None),
+            )
+    finally:
+        locked.chmod(0o755)

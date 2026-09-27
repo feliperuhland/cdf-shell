@@ -49,6 +49,22 @@ def shell_init_script(shell: str) -> str:
     return script.read_text(encoding="utf-8")
 
 
+def _write_stdout(data: bytes) -> bool:
+    """Write raw bytes to stdout; False if the reader has already gone away."""
+    try:
+        sys.stdout.flush()
+        sys.stdout.buffer.write(data)
+        sys.stdout.buffer.flush()
+    except BrokenPipeError:
+        # Point stdout at /dev/null so the interpreter's own flush at exit
+        # doesn't raise (and print a traceback) a second time.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        os.close(devnull)
+        return False
+    return True
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cdf",
@@ -126,8 +142,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.init is not None:
-        sys.stdout.write(shell_init_script(args.init))
-        return _EXIT_SELECTED
+        written = _write_stdout(shell_init_script(args.init).encode())
+        return _EXIT_SELECTED if written else _EXIT_ERROR
 
     try:
         config = resolve_config(
@@ -160,10 +176,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # Raw bytes: a non-UTF-8 name can't go through the text layer under a
     # strict locale (e.g. en_US.UTF-8), and the shell needs the exact bytes.
-    sys.stdout.flush()
-    sys.stdout.buffer.write(os.fsencode(target) + b"\n")
-    sys.stdout.buffer.flush()
-    return _EXIT_SELECTED
+    # If nobody read the path, it wasn't delivered: report that, not success.
+    written = _write_stdout(os.fsencode(target) + b"\n")
+    return _EXIT_SELECTED if written else _EXIT_ERROR
 
 
 if __name__ == "__main__":

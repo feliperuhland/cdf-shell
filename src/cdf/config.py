@@ -44,7 +44,10 @@ def default_config_paths() -> tuple[Path, ...]:
 
 
 def _first_existing_default(paths: tuple[Path, ...]) -> Path | None:
-    return next((path for path in paths if path.exists()), None)
+    # os.path.isfile, not Path.exists: on Python < 3.14 the latter raises
+    # PermissionError when a parent (e.g. ~/.config) can't be searched, and a
+    # file nobody can reach can't be the one the user meant.
+    return next((path for path in paths if os.path.isfile(path)), None)
 
 
 def _absolute(path: Path | None) -> Path:
@@ -60,13 +63,13 @@ def _absolute(path: Path | None) -> Path:
 
 
 def load_config_file(config_path: Path) -> dict[str, object]:
-    # Default locations are only ever passed in when they exist, so a missing
-    # file here is always one the user named (-c or $CDF_CONFIG_PATH).
-    if not config_path.exists():
-        raise CdfError(f"config file not found: {config_path}")
     try:
         with config_path.open("rb") as config_file:
             data = tomllib.load(config_file)
+    except FileNotFoundError as exc:
+        # Default locations are only ever passed in when they exist, so a
+        # missing file here is always one the user named (-c or $CDF_CONFIG_PATH).
+        raise CdfError(f"config file not found: {config_path}") from exc
     except tomllib.TOMLDecodeError as exc:
         raise CdfError(f"invalid config file {config_path}: {exc}") from exc
     except OSError as exc:
@@ -106,6 +109,14 @@ def _file_overrides(file_data: dict[str, object], config_path: Path) -> dict[str
         patterns = file_data["ignore"]
         if not isinstance(patterns, list) or not all(isinstance(p, str) for p in patterns):
             raise CdfError(f"{config_path}: 'ignore' must be a list of strings")
+        # Patterns are matched against one directory name at a time, so one
+        # with a "/" could never match; say so instead of silently ignoring it.
+        with_slash = [pattern for pattern in patterns if "/" in pattern]
+        if with_slash:
+            raise CdfError(
+                f"{config_path}: 'ignore' patterns match single directory names and "
+                f"can't contain '/': {', '.join(with_slash)}"
+            )
         overrides["ignore"] = tuple(patterns)
 
     return overrides
