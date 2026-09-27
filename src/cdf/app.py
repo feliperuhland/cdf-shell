@@ -26,7 +26,7 @@ def resolve(
     first = next(candidates, None)
     if first is None:
         raise NoCandidatesError(_no_candidates_message(root, git_only=git_only))
-    return picker.pick(itertools.chain([first], candidates), term)
+    return picker.pick(itertools.chain([first], candidates), term, root=root)
 
 
 def _enclosing_repo(root: Path) -> Path | None:

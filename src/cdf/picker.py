@@ -17,19 +17,25 @@ _EXIT_INTERRUPTED = 130
 
 
 class Picker(Protocol):
-    def pick(self, candidates: Iterable[Path], term: str) -> Path | None: ...
+    def pick(self, candidates: Iterable[Path], term: str, *, root: Path) -> Path | None: ...
 
 
-def _display(path: Path) -> bytes:
-    # What fzf shows and matches: the path with control characters (escape
-    # sequences, newlines, tabs) neutralised. Never used to resolve the pick
-    # except as a fallback; the index maps back to the exact original Path.
-    return os.fsencode(printable(os.fspath(path)))
+def _display(path: Path, root: Path) -> bytes:
+    # What fzf shows and matches: the path relative to the search root (so the
+    # root's own components don't match every query), with control characters
+    # (escape sequences, newlines, tabs) neutralised. Never used to resolve the
+    # pick except as a fallback; the index maps back to the exact original Path.
+    try:
+        shown = path.relative_to(root)
+    except ValueError:
+        shown = path
+    return os.fsencode(printable(os.fspath(shown)))
 
 
 def _feed(
     process: subprocess.Popen[bytes],
     candidates: Iterable[Path],
+    root: Path,
     seen: list[Path],
     errors: list[Exception],
 ) -> None:
@@ -44,7 +50,7 @@ def _feed(
     try:
         for candidate in candidates:
             seen.append(candidate)
-            stdin.write(b"%d\t%s\0" % (len(seen) - 1, _display(candidate)))
+            stdin.write(b"%d\t%s\0" % (len(seen) - 1, _display(candidate, root)))
     except BrokenPipeError:
         pass
     except Exception as exc:
@@ -57,14 +63,14 @@ def _feed(
         stdin.close()
 
 
-def _parse_selection(output: bytes, seen: list[Path]) -> Path | None:
+def _parse_selection(output: bytes, seen: list[Path], root: Path) -> Path | None:
     # FZF_DEFAULT_OPTS may add --print-query/--expect/--multi, which put extra
     # NUL-delimited entries in the output. The selection is the last entry.
     entries = [entry for entry in output.split(b"\0") if entry]
     if not entries:
         return None
     entry = entries[-1]
-    selected = _by_index(entry, seen) or _by_display(entry, seen)
+    selected = _by_index(entry, seen) or _by_display(entry, seen, root)
     if selected is None:
         raise CdfError(f"unexpected output from fzf: {entry!r}")
     if not selected.is_dir():
@@ -79,25 +85,27 @@ def _by_index(entry: bytes, seen: list[Path]) -> Path | None:
     return seen[int(index)]
 
 
-def _by_display(entry: bytes, seen: list[Path]) -> Path | None:
+def _by_display(entry: bytes, seen: list[Path], root: Path) -> Path | None:
     # Fallback for an --accept-nth in FZF_DEFAULT_OPTS that prints only the
     # display field. (Overriding it with --accept-nth ourselves would break
     # fzf < 0.60, which rejects the option.) Displays never contain a tab, so
     # this can't be confused with the index form; ambiguity is refused.
-    matches = [path for path in seen if _display(path) == entry]
+    matches = [path for path in seen if _display(path, root) == entry]
     return matches[0] if len(matches) == 1 else None
 
 
 class FzfPicker:
-    def pick(self, candidates: Iterable[Path], term: str) -> Path | None:
-        if shutil.which("fzf") is None:
+    def pick(self, candidates: Iterable[Path], term: str, *, root: Path) -> Path | None:
+        # Run exactly the fzf that was found, rather than searching PATH again.
+        fzf = shutil.which("fzf")
+        if fzf is None:
             raise CdfError("fzf not found on PATH. Install it: https://github.com/junegunn/fzf")
 
         # Unbuffered stdin so each candidate reaches fzf as soon as the walker
         # finds it; stderr is inherited so fzf's own error messages show up.
         process = subprocess.Popen(
             [
-                "fzf",
+                fzf,
                 "--read0",
                 "--print0",
                 "--delimiter",
@@ -116,7 +124,7 @@ class FzfPicker:
         errors: list[Exception] = []
         # Daemon thread: once fzf exits we return without waiting for the walk.
         feeder = threading.Thread(
-            target=_feed, args=(process, candidates, seen, errors), daemon=True
+            target=_feed, args=(process, candidates, root, seen, errors), daemon=True
         )
         feeder.start()
 
@@ -129,7 +137,7 @@ class FzfPicker:
             raise
 
         if returncode == _EXIT_MATCHED:
-            return _parse_selection(output, seen)
+            return _parse_selection(output, seen, root)
         if errors:
             raise CdfError(f"directory walk failed: {errors[0]}") from errors[0]
         if returncode in (_EXIT_NO_MATCH, _EXIT_INTERRUPTED):

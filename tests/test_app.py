@@ -25,10 +25,10 @@ class FakeWalker:
 class FakePicker:
     def __init__(self, selection: Path | None) -> None:
         self._selection = selection
-        self.calls: list[tuple[list[Path], str]] = []
+        self.calls: list[tuple[list[Path], str, Path]] = []
 
-    def pick(self, candidates: Iterable[Path], term: str) -> Path | None:
-        self.calls.append((list(candidates), term))
+    def pick(self, candidates: Iterable[Path], term: str, *, root: Path) -> Path | None:
+        self.calls.append((list(candidates), term, root))
         return self._selection
 
 
@@ -49,7 +49,7 @@ def test_resolve_wires_walker_and_picker(tmp_path: Path) -> None:
 
     assert result == second
     assert walker.calls == [(tmp_path, True, False, ("node_modules",))]
-    assert picker.calls == [([first, second], "term")]
+    assert picker.calls == [([first, second], "term", tmp_path)]
 
 
 @pytest.mark.parametrize(

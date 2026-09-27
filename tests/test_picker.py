@@ -60,7 +60,7 @@ def test_pick_returns_selected_path(tmp_path: Path, fake_fzf: FakeFzf) -> None:
     repo.mkdir()
     fake_fzf.respond(0, b"0\t" + os.fsencode(repo) + b"\0")
 
-    result = FzfPicker().pick([repo], "my term")
+    result = FzfPicker().pick([repo], "my term", root=tmp_path)
 
     assert result == repo
     assert fake_fzf.args == [
@@ -80,11 +80,10 @@ def test_pick_streams_nul_delimited_input(tmp_path: Path, fake_fzf: FakeFzf) -> 
     weird.mkdir()
     fake_fzf.respond(0, b"0\t" + os.fsencode(weird) + b"\0")
 
-    result = FzfPicker().pick(iter([weird, Path("/normal")]), "")
+    result = FzfPicker().pick(iter([weird, Path("/normal")]), "", root=tmp_path)
 
     # fzf sees the newline as "?" (display only); the pick maps back exactly.
-    shown = os.fsencode(tmp_path) + b"/weird?name"
-    assert fake_fzf.input == b"0\t" + shown + b"\0" + b"1\t/normal\0"
+    assert fake_fzf.input == b"0\tweird?name\0" + b"1\t/normal\0"
     assert result == weird
 
 
@@ -96,9 +95,9 @@ def test_pick_handles_non_utf8_names(tmp_path: Path, fake_fzf: FakeFzf) -> None:
     mangled = os.fsencode(tmp_path) + b"/bad\xef\xbf\xbd"
     fake_fzf.respond(0, b"0\t" + mangled + b"\0")
 
-    result = FzfPicker().pick([undecodable], "")
+    result = FzfPicker().pick([undecodable], "", root=tmp_path)
 
-    assert fake_fzf.input == b"0\t" + raw_name + b"\0"
+    assert fake_fzf.input == b"0\tbad\xff\0"
     assert result == undecodable
 
 
@@ -109,7 +108,7 @@ def test_pick_takes_last_entry_when_default_opts_add_query(
     repo.mkdir()
     fake_fzf.respond(0, b"typed query\0" + b"0\t" + os.fsencode(repo) + b"\0")
 
-    result = FzfPicker().pick([repo], "")
+    result = FzfPicker().pick([repo], "", root=tmp_path)
 
     assert result == repo
 
@@ -118,7 +117,7 @@ def test_pick_rejects_selection_that_no_longer_exists(fake_fzf: FakeFzf) -> None
     fake_fzf.respond(0, b"0\t/definitely/not/here\0")
 
     with pytest.raises(CdfError, match="no longer exists"):
-        FzfPicker().pick([Path("/definitely/not/here")], "")
+        FzfPicker().pick([Path("/definitely/not/here")], "", root=Path("/"))
 
 
 @pytest.mark.parametrize("output", [b"garbage\0", b"7\t/x\0"])
@@ -126,27 +125,27 @@ def test_pick_rejects_unexpected_output(fake_fzf: FakeFzf, output: bytes) -> Non
     fake_fzf.respond(0, output)
 
     with pytest.raises(CdfError, match="unexpected output from fzf"):
-        FzfPicker().pick([Path("/x")], "")
+        FzfPicker().pick([Path("/x")], "", root=Path("/"))
 
 
 def test_pick_returns_none_on_empty_output(fake_fzf: FakeFzf) -> None:
     fake_fzf.respond(0, b"")
 
-    assert FzfPicker().pick([Path("/x")], "") is None
+    assert FzfPicker().pick([Path("/x")], "", root=Path("/")) is None
 
 
 @pytest.mark.parametrize("returncode", [1, 130])
 def test_pick_returns_none_on_no_match_or_interrupt(fake_fzf: FakeFzf, returncode: int) -> None:
     fake_fzf.respond(returncode, b"")
 
-    assert FzfPicker().pick([Path("/some/repo")], "term") is None
+    assert FzfPicker().pick([Path("/some/repo")], "term", root=Path("/")) is None
 
 
 def test_pick_raises_on_fzf_error(fake_fzf: FakeFzf) -> None:
     fake_fzf.respond(2, b"")
 
     with pytest.raises(CdfError, match="status 2"):
-        FzfPicker().pick([Path("/some/repo")], "term")
+        FzfPicker().pick([Path("/some/repo")], "term", root=Path("/"))
 
 
 def test_pick_returns_without_waiting_for_the_walk(
@@ -164,7 +163,7 @@ def test_pick_returns_without_waiting_for_the_walk(
         yield tmp_path / "late"
 
     try:
-        result = FzfPicker().pick(slow_walk(), "")
+        result = FzfPicker().pick(slow_walk(), "", root=tmp_path)
     finally:
         release.set()
 
@@ -192,7 +191,7 @@ def test_pick_kills_fzf_when_interrupted(
     monkeypatch.setattr("cdf.picker.subprocess.Popen", popen)
 
     with pytest.raises(KeyboardInterrupt):
-        FzfPicker().pick([Path("/x")], "")
+        FzfPicker().pick([Path("/x")], "", root=Path("/"))
 
     assert started[0].returncode is not None
 
@@ -201,7 +200,7 @@ def test_pick_raises_when_fzf_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("cdf.picker.shutil.which", lambda name: None)
 
     with pytest.raises(CdfError, match="fzf"):
-        FzfPicker().pick([Path("/some/repo")], "term")
+        FzfPicker().pick([Path("/some/repo")], "term", root=Path("/"))
 
 
 def test_walk_failure_stops_fzf_and_is_reported(tmp_path: Path, fake_fzf: FakeFzf) -> None:
@@ -212,7 +211,7 @@ def test_walk_failure_stops_fzf_and_is_reported(tmp_path: Path, fake_fzf: FakeFz
         raise OSError("disk on fire")
 
     with pytest.raises(CdfError, match="directory walk failed: disk on fire"):
-        FzfPicker().pick(failing_walk(), "")
+        FzfPicker().pick(failing_walk(), "", root=tmp_path)
 
 
 def test_pick_shows_control_characters_as_question_marks(tmp_path: Path, fake_fzf: FakeFzf) -> None:
@@ -220,9 +219,9 @@ def test_pick_shows_control_characters_as_question_marks(tmp_path: Path, fake_fz
     evil.mkdir()
     fake_fzf.respond(0, b"0\t\0")
 
-    result = FzfPicker().pick([evil], "")
+    result = FzfPicker().pick([evil], "", root=tmp_path)
 
-    assert fake_fzf.input == b"0\t" + os.fsencode(tmp_path) + b"/evil?]0;title??red\0"
+    assert fake_fzf.input == b"0\tevil?]0;title??red\0"
     assert result == evil
 
 
@@ -233,9 +232,9 @@ def test_pick_falls_back_to_display_when_accept_nth_drops_index(
     first, second = tmp_path / "a\tb", tmp_path / "c"
     first.mkdir()
     second.mkdir()
-    fake_fzf.respond(0, os.fsencode(tmp_path) + b"/a?b\0")
+    fake_fzf.respond(0, b"a?b\0")
 
-    assert FzfPicker().pick([first, second], "") == first
+    assert FzfPicker().pick([first, second], "", root=tmp_path) == first
 
 
 def test_pick_refuses_ambiguous_display_fallback(tmp_path: Path, fake_fzf: FakeFzf) -> None:
@@ -243,10 +242,10 @@ def test_pick_refuses_ambiguous_display_fallback(tmp_path: Path, fake_fzf: FakeF
     first, second = tmp_path / "a\x01", tmp_path / "a\x02"
     first.mkdir()
     second.mkdir()
-    fake_fzf.respond(0, os.fsencode(tmp_path) + b"/a?\0")
+    fake_fzf.respond(0, b"a?\0")
 
     with pytest.raises(CdfError, match="unexpected output from fzf"):
-        FzfPicker().pick([first, second], "")
+        FzfPicker().pick([first, second], "", root=tmp_path)
 
 
 # --- Against the real fzf ---------------------------------------------------
@@ -280,7 +279,7 @@ def test_real_fzf_picks_exact_path(tmp_path: Path, real_fzf: Callable[[str], Non
     wanted.mkdir()
     real_fzf("--exact --filter=wanted")
 
-    assert FzfPicker().pick([other, wanted], "") == wanted
+    assert FzfPicker().pick([other, wanted], "", root=tmp_path) == wanted
 
 
 def test_real_fzf_round_trips_hostile_names(
@@ -292,7 +291,7 @@ def test_real_fzf_round_trips_hostile_names(
     (tmp_path / "plain").mkdir()
     real_fzf("--exact --filter=zz-bad")
 
-    assert FzfPicker().pick([tmp_path / "plain", hostile], "") == hostile
+    assert FzfPicker().pick([tmp_path / "plain", hostile], "", root=tmp_path) == hostile
 
 
 def test_real_fzf_does_not_match_the_hidden_index(
@@ -300,10 +299,10 @@ def test_real_fzf_does_not_match_the_hidden_index(
 ) -> None:
     (tmp_path / "abc").mkdir()
     # "^0" matches only if the line starts with the index, i.e. if --with-nth
-    # failed to hide it (every display starts with "/").
+    # failed to hide it (the only display is "abc").
     real_fzf("--exact --filter=^0")
 
-    assert FzfPicker().pick([tmp_path / "abc"], "") is None
+    assert FzfPicker().pick([tmp_path / "abc"], "", root=tmp_path) is None
 
 
 def test_real_fzf_tolerates_print_query(tmp_path: Path, real_fzf: Callable[[str], None]) -> None:
@@ -311,7 +310,7 @@ def test_real_fzf_tolerates_print_query(tmp_path: Path, real_fzf: Callable[[str]
     wanted.mkdir()
     real_fzf("--exact --filter=wanted --print-query")
 
-    assert FzfPicker().pick([wanted], "") == wanted
+    assert FzfPicker().pick([wanted], "", root=tmp_path) == wanted
 
 
 def test_real_fzf_tolerates_accept_nth(tmp_path: Path, real_fzf: Callable[[str], None]) -> None:
@@ -322,4 +321,37 @@ def test_real_fzf_tolerates_accept_nth(tmp_path: Path, real_fzf: Callable[[str],
     wanted.mkdir()
     real_fzf("--exact --filter=wanted --accept-nth=2")
 
-    assert FzfPicker().pick([other, wanted], "") == wanted
+    assert FzfPicker().pick([other, wanted], "", root=tmp_path) == wanted
+
+
+def test_pick_shows_paths_relative_to_root(tmp_path: Path, fake_fzf: FakeFzf) -> None:
+    nested = tmp_path / "projects" / "cdf"
+    nested.mkdir(parents=True)
+    fake_fzf.respond(0, b"0\tprojects/cdf\0")
+
+    result = FzfPicker().pick([nested], "", root=tmp_path)
+
+    assert fake_fzf.input == b"0\tprojects/cdf\0"
+    assert result == nested
+
+
+def test_pick_runs_the_fzf_that_was_found(
+    tmp_path: Path, fake_fzf: FakeFzf, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Whatever PATH says at launch time, the binary `which` resolved is the one run.
+    found = tmp_path / "bin" / "fzf"
+    monkeypatch.setattr("cdf.picker.shutil.which", lambda name: str(found))
+    monkeypatch.setenv("PATH", os.defpath)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    fake_fzf.respond(0, b"0\trepo\0")
+
+    assert FzfPicker().pick([repo], "", root=tmp_path) == repo
+
+
+def test_real_fzf_ignores_the_root_prefix(tmp_path: Path, real_fzf: Callable[[str], None]) -> None:
+    root = tmp_path / "rootonlyword"
+    (root / "abc").mkdir(parents=True)
+    real_fzf("--exact --filter=rootonlyword")
+
+    assert FzfPicker().pick([root / "abc"], "", root=root) is None

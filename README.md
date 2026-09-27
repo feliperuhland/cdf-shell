@@ -13,6 +13,8 @@ select.
 - Selection is powered by [`fzf`](https://github.com/junegunn/fzf) 0.44 or
   newer, which must be on `PATH`. Your `FZF_DEFAULT_OPTS` (theme, layout,
   `--print-query`, `--accept-nth`, ...) are respected.
+- Results are shown (and fuzzy-matched) relative to the search root, so the
+  root's own path doesn't match every query.
 - Directory names are shown with terminal control characters (escape
   sequences, newlines, tabs) replaced by `?`, so a hostile name in a cloned
   repo can't mess with your terminal; the directory you pick is still the
